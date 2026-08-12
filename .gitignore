@@ -1,7 +1,7 @@
 # Streamlit Secrets (NEVER COMMIT)
 .streamlit/secrets.toml
 .streamlit/secrets.json
-.streamlit/*
+!.streamlit/config.toml
 !.streamlit/secrets.toml.example
 
 # Local Database
