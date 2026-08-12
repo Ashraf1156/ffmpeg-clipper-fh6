@@ -149,8 +149,15 @@ def get_ffmpeg_executable():
     except Exception:
         return "ffmpeg"
 
-def select_local_file(title="Select Video File"):
+def is_gui_available():
     if not HAS_TKINTER:
+        return False
+    if os.name != "nt" and not os.environ.get("DISPLAY"):
+        return False
+    return True
+
+def select_local_file(title="Select Video File"):
+    if not is_gui_available():
         return ""
     try:
         root = tk.Tk()
@@ -439,7 +446,7 @@ with tab_clip:
         if input_path != st.session_state.source_video_path:
             st.session_state.source_video_path = input_path
             
-        if HAS_TKINTER:
+        if is_gui_available():
             if st.button("📁 Browse Local Desktop File", use_container_width=True):
                 selected_path = select_local_file("Select Source Video File")
                 if selected_path:
@@ -482,7 +489,7 @@ with tab_clip:
         if input_tmpl_path != st.session_state.template_video_path:
             st.session_state.template_video_path = input_tmpl_path
             
-        if HAS_TKINTER:
+        if is_gui_available():
             if st.button("📁 Browse Local Outro Template File", use_container_width=True):
                 selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
                 if selected_tmpl_path:
