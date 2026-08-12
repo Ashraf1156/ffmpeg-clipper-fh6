@@ -110,6 +110,34 @@ The application will open in your default browser at `http://localhost:8501`.
 
 ---
 
+## 📦 Building Standalone Windows Executable (`.exe`)
+
+You can compile **StreamCut R2** into a standalone Windows `.exe` application that runs without needing Python pre-installed:
+
+### Option A: Automatic Batch Script (Recommended)
+Double-click **`build_exe.bat`** (or run `.\build_exe.bat` in Terminal).
+
+### Option B: Manual Command
+```cmd
+# 1. Install PyInstaller
+pip install pyinstaller
+
+# 2. Build .exe bundle
+pyinstaller --noconfirm --onedir --name "StreamCut_R2" ^
+  --copy-metadata streamlit ^
+  --collect-all streamlit ^
+  --add-data "app.py;." ^
+  --add-data ".streamlit;.streamlit" ^
+  run_app.py
+```
+
+The compiled standalone executable will be output in:
+`dist\StreamCut_R2\StreamCut_R2.exe`
+
+Double-clicking `StreamCut_R2.exe` launches the background engine and opens the application in your browser automatically!
+
+---
+
 ## 📁 Project Structure
 
 ```text
