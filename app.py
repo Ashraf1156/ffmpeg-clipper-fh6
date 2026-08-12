@@ -8,11 +8,16 @@ import datetime
 import requests
 import boto3
 import streamlit as st
-import tkinter as tk
-from tkinter import filedialog
 import shutil
 import imageio_ffmpeg
 import toml
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+    HAS_TKINTER = True
+except Exception:
+    HAS_TKINTER = False
 
 # ==========================================
 # PAGE CONFIGURATION & THEME-ADAPTIVE STYLING
@@ -145,18 +150,23 @@ def get_ffmpeg_executable():
         return "ffmpeg"
 
 def select_local_file(title="Select Video File"):
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    file_path = filedialog.askopenfilename(
-        title=title,
-        filetypes=[
-            ("Video Files", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.flv"),
-            ("All Files", "*.*")
-        ]
-    )
-    root.destroy()
-    return file_path
+    if not HAS_TKINTER:
+        return ""
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        file_path = filedialog.askopenfilename(
+            title=title,
+            filetypes=[
+                ("Video Files", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.flv"),
+                ("All Files", "*.*")
+            ]
+        )
+        root.destroy()
+        return file_path
+    except Exception:
+        return ""
 
 # ==========================================
 # MODULE A: IN-MEMORY CLIPPER & R2 UPLOADER
