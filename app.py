@@ -23,7 +23,7 @@ except Exception:
 # PAGE CONFIGURATION & THEME-ADAPTIVE STYLING
 # ==========================================
 st.set_page_config(
-    page_title="StreamCut R2 - Video Clipper & Scheduler",
+    page_title="StreamCut R2 - Raw Video Storage & Shorts Clipper",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -137,9 +137,6 @@ def get_r2_client():
         region_name="auto"
     )
 
-# ==========================================
-# TKINTER NATIVE FILE PICKER & FFMPEG RESOLVER
-# ==========================================
 def get_ffmpeg_executable():
     system_ffmpeg = shutil.which("ffmpeg")
     if system_ffmpeg:
@@ -156,39 +153,85 @@ def is_gui_available():
         return False
     return True
 
-def select_local_file(title="Select Video File"):
-    if not is_gui_available():
-        return ""
+# ==========================================
+# RAW LONG VIDEO R2 MANAGEMENT
+# ==========================================
+def list_raw_videos_from_r2():
+    s3_client = get_r2_client()
+    app_sec = load_app_secrets()
+    bucket_name = app_sec.get("r2", {}).get("bucket_name", "")
+    public_domain = app_sec.get("r2", {}).get("public_domain", "")
+    
     try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        file_path = filedialog.askopenfilename(
-            title=title,
-            filetypes=[
-                ("Video Files", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.flv"),
-                ("All Files", "*.*")
-            ]
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="raw_videos/")
+        raw_list = []
+        for obj in response.get("Contents", []):
+            key = obj["Key"]
+            if key == "raw_videos/" or key.endswith("/"):
+                continue
+            filename = os.path.basename(key)
+            if public_domain:
+                url = f"{public_domain.rstrip('/')}/{key}"
+            else:
+                url = s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket_name, "Key": key},
+                    ExpiresIn=604800
+                )
+            size_mb = round(obj["Size"] / (1024 * 1024), 2)
+            raw_list.append({
+                "filename": filename,
+                "r2_key": key,
+                "r2_url": url,
+                "size_mb": size_mb,
+                "last_modified": obj["LastModified"].strftime("%Y-%m-%d %H:%M")
+            })
+        return raw_list
+    except Exception as e:
+        st.error(f"Error fetching raw videos from R2: {e}")
+        return []
+
+def upload_raw_video_to_r2(file_buffer, filename, is_outro_template=False):
+    s3_client = get_r2_client()
+    app_sec = load_app_secrets()
+    bucket_name = app_sec.get("r2", {}).get("bucket_name", "")
+    public_domain = app_sec.get("r2", {}).get("public_domain", "")
+    
+    sanitized = "".join(c for c in filename if c.isalnum() or c in (".", "-", "_")).strip()
+    prefix = "raw_videos/templates/" if is_outro_template else "raw_videos/"
+    r2_key = f"{prefix}{sanitized}"
+    
+    s3_client.upload_fileobj(
+        file_buffer,
+        bucket_name,
+        r2_key,
+        ExtraArgs={"ContentType": "video/mp4"}
+    )
+    
+    if public_domain:
+        r2_url = f"{public_domain.rstrip('/')}/{r2_key}"
+    else:
+        r2_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket_name, "Key": r2_key},
+            ExpiresIn=604800
         )
-        root.destroy()
-        return file_path
-    except Exception:
-        return ""
+    return r2_key, r2_url
 
 # ==========================================
-# MODULE A: IN-MEMORY CLIPPER & R2 UPLOADER
+# MODULE A: STREAMING CLIPPER FROM R2
 # ==========================================
-def cut_and_upload_to_r2(source_path, start_time, end_time, label, template_path=None):
+def cut_and_upload_short_from_r2(raw_video_url, start_time, end_time, label, template_url=None):
     ffmpeg_exe = get_ffmpeg_executable()
     
-    if template_path and os.path.exists(template_path):
+    if template_url:
         cmd = [
             ffmpeg_exe,
             "-y",
             "-ss", str(start_time),
             "-to", str(end_time),
-            "-i", str(source_path),
-            "-i", str(template_path),
+            "-i", str(raw_video_url),
+            "-i", str(template_url),
             "-filter_complex", "[0:v][0:a][1:v][1:a] concat=n=2:v=1:a=1 [v] [a]",
             "-map", "[v]",
             "-map", "[a]",
@@ -205,7 +248,7 @@ def cut_and_upload_to_r2(source_path, start_time, end_time, label, template_path
             "-y",
             "-ss", str(start_time),
             "-to", str(end_time),
-            "-i", str(source_path),
+            "-i", str(raw_video_url),
             "-c", "copy",
             "-movflags", "frag_keyframe+empty_moov",
             "-f", "mp4",
@@ -217,7 +260,7 @@ def cut_and_upload_to_r2(source_path, start_time, end_time, label, template_path
     
     if process.returncode != 0:
         error_msg = stderr_bytes.decode("utf-8", errors="ignore")
-        raise RuntimeError(f"FFmpeg process error: {error_msg}")
+        raise RuntimeError(f"FFmpeg processing error: {error_msg}")
         
     buffer = io.BytesIO(stdout_bytes)
     
@@ -251,7 +294,7 @@ def cut_and_upload_to_r2(source_path, start_time, end_time, label, template_path
     cursor.execute("""
         INSERT INTO clips (clip_id, label, r2_key, r2_url, source_path, start_time, end_time, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'SAVED_IN_R2')
-    """, (clip_uuid, label, r2_key, r2_url, source_path, start_time, end_time))
+    """, (clip_uuid, label, r2_key, r2_url, raw_video_url, start_time, end_time))
     conn.commit()
     conn.close()
     
@@ -400,118 +443,101 @@ def delete_clips_from_r2_and_db(clip_db_ids):
 # MAIN APPLICATION INTERFACE
 # ==========================================
 st.title("StreamCut R2")
-st.caption("In-Memory Video Trimmer, Outro Concatenator, Cloudflare R2 Streamer & Social Media Scheduler")
+st.caption("Cloud-Native Video Storage, Short Video Clipper & Social Media Publisher")
 st.markdown("<br>", unsafe_allow_html=True)
 
-if "source_video_path" not in st.session_state:
-    st.session_state.source_video_path = ""
-if "template_video_path" not in st.session_state:
-    st.session_state.template_video_path = ""
 if "clip_ranges" not in st.session_state:
     st.session_state.clip_ranges = [{"from": "00:00:00", "to": "00:00:25", "label": "Clip 1"}]
 
 tab_clip, tab_schedule, tab_dashboard = st.tabs([
-    "Module A: In-Memory Clipper & R2 Upload",
+    "Module A: R2 Raw Videos & Shorts Clipper",
     "Module B: Social Media Scheduler & Instant Publisher",
     "Module C: Status Management & Cleanup"
 ])
 
 # ------------------------------------------
-# TAB A: IN-MEMORY CLIPPER & R2 UPLOADER
+# TAB A: R2 RAW VIDEOS & SHORTS CLIPPER
 # ------------------------------------------
 with tab_clip:
-    st.subheader("1. Source Video Selection (Hook + Main Content)")
+    st.subheader("1. Raw Long Videos Storage (Cloudflare R2)")
     
-    col_up_src, col_path_src = st.columns([1, 1])
-    with col_up_src:
-        uploaded_src = st.file_uploader(
-            "Upload Source Video File (Drag & Drop or Click)",
-            type=["mp4", "mov", "mkv", "avi", "webm", "m4v"],
-            key="src_uploader"
-        )
-        if uploaded_src is not None:
-            temp_dir = os.path.join(".", "temp_uploads")
-            os.makedirs(temp_dir, exist_ok=True)
-            saved_src_path = os.path.join(temp_dir, uploaded_src.name)
-            with open(saved_src_path, "wb") as f:
-                f.write(uploaded_src.getbuffer())
-            st.session_state.source_video_path = os.path.abspath(saved_src_path)
-            
-    with col_path_src:
-        input_path = st.text_input(
-            "Or Enter Local / Server Video File Path",
-            value=st.session_state.source_video_path,
-            key="src_text_input"
-        )
-        if input_path != st.session_state.source_video_path:
-            st.session_state.source_video_path = input_path
-            
-        if is_gui_available():
-            if st.button("📁 Browse Local Desktop File", use_container_width=True):
-                selected_path = select_local_file("Select Source Video File")
-                if selected_path:
-                    st.session_state.source_video_path = selected_path
-                    st.rerun()
-                    
-    if st.session_state.source_video_path:
-        c_src_info, c_src_btn = st.columns([3, 1], vertical_alignment="center")
-        with c_src_info:
-            st.success(f"**Selected Source File:** `{st.session_state.source_video_path}`")
-        with c_src_btn:
-            if st.button("Preview Source Video", use_container_width=True):
-                preview_video_dialog(st.session_state.source_video_path, "Source Video Preview")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.subheader("2. Outro / Subscribe Animation Template Video (Optional)")
-    st.caption("Select a 5-second Subscribe & Follow animation template video to append at the end of every clip:")
+    col_up, col_list = st.columns([1, 1])
     
-    col_up_tmpl, col_path_tmpl = st.columns([1, 1])
-    with col_up_tmpl:
-        uploaded_tmpl = st.file_uploader(
-            "Upload Subscribe Outro Template Video",
+    with col_up:
+        st.markdown("**Upload New Raw Long Video to R2 Bucket (`raw_videos/`)**")
+        uploaded_raw = st.file_uploader(
+            "Choose a raw long video file (no size limit)",
             type=["mp4", "mov", "mkv", "avi", "webm", "m4v"],
-            key="tmpl_uploader"
+            key="raw_video_uploader"
         )
-        if uploaded_tmpl is not None:
-            temp_dir = os.path.join(".", "temp_uploads")
-            os.makedirs(temp_dir, exist_ok=True)
-            saved_tmpl_path = os.path.join(temp_dir, uploaded_tmpl.name)
-            with open(saved_tmpl_path, "wb") as f:
-                f.write(uploaded_tmpl.getbuffer())
-            st.session_state.template_video_path = os.path.abspath(saved_tmpl_path)
+        if uploaded_raw is not None:
+            if st.button("Upload Raw Video to Cloudflare R2", type="primary", use_container_width=True):
+                with st.spinner(f"Uploading '{uploaded_raw.name}' directly to Cloudflare R2 bucket..."):
+                    try:
+                        r_key, r_url = upload_raw_video_to_r2(uploaded_raw, uploaded_raw.name)
+                        st.success(f"Successfully uploaded '{uploaded_raw.name}' to R2 (`{r_key}`)!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Upload failed: {e}")
+                        
+    with col_list:
+        st.markdown("**Select Raw Video from R2 Bucket**")
+        raw_videos_list = list_raw_videos_from_r2()
+        
+        if not raw_videos_list:
+            st.info("No raw long videos found in your R2 bucket (`raw_videos/`). Upload one on the left to get started!")
+            selected_raw = None
+        else:
+            raw_options = {f"{v['filename']} ({v['size_mb']} MB)": v for v in raw_videos_list}
+            selected_raw_label = st.selectbox("Select Target Raw Video for Short Clipping", list(raw_options.keys()))
+            selected_raw = raw_options[selected_raw_label]
             
-    with col_path_tmpl:
-        input_tmpl_path = st.text_input(
-            "Or Enter Outro Template File Path",
-            value=st.session_state.template_video_path,
-            key="tmpl_text_input"
-        )
-        if input_tmpl_path != st.session_state.template_video_path:
-            st.session_state.template_video_path = input_tmpl_path
-            
-        if is_gui_available():
-            if st.button("📁 Browse Local Outro Template File", use_container_width=True):
-                selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
-                if selected_tmpl_path:
-                    st.session_state.template_video_path = selected_tmpl_path
-                    st.rerun()
-                    
-    if st.session_state.template_video_path:
-        c_tmpl_info, c_tmpl_btn = st.columns([3, 1], vertical_alignment="center")
-        with c_tmpl_info:
-            st.info(f"**Selected Outro Template:** `{st.session_state.template_video_path}`")
-        with c_tmpl_btn:
-            if st.button("Preview Template Video", use_container_width=True):
-                preview_video_dialog(st.session_state.template_video_path, "Outro Template Video Preview")
-            
-    if st.session_state.template_video_path:
-        use_template = st.checkbox("Append Subscribe & Follow Outro Template to generated clips", value=True)
-    else:
-        use_template = False
+    if selected_raw:
+        st.markdown("<br>", unsafe_allow_html=True)
+        c_info, c_prev = st.columns([3, 1], vertical_alignment="center")
+        with c_info:
+            st.success(f"**Active Raw Video:** `{selected_raw['filename']}` | Size: `{selected_raw['size_mb']} MB` | Key: `{selected_raw['r2_key']}`")
+        with c_prev:
+            if st.button("Preview Selected Raw Video", use_container_width=True):
+                preview_video_dialog(selected_raw["r2_url"], f"Raw Video Preview: {selected_raw['filename']}")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.subheader("3. Dynamic Clip Range Builder (Hook + Content)")
-    st.caption("Define start time (hh:mm:ss), end time (hh:mm:ss), and label for each clip:")
+    st.divider()
+    st.subheader("2. Outro / Subscribe Animation Template (Optional)")
+    
+    col_out_up, col_out_sel = st.columns([1, 1])
+    with col_out_up:
+        uploaded_outro = st.file_uploader(
+            "Upload Outro Template Video to R2",
+            type=["mp4", "mov", "mkv", "avi", "webm"],
+            key="outro_template_uploader"
+        )
+        if uploaded_outro is not None:
+            if st.button("Upload Outro Template to R2", use_container_width=True):
+                with st.spinner(f"Uploading template '{uploaded_outro.name}' to R2..."):
+                    try:
+                        tk_key, tk_url = upload_raw_video_to_r2(uploaded_outro, uploaded_outro.name, is_outro_template=True)
+                        st.success(f"Successfully uploaded outro template '{uploaded_outro.name}'!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Template upload failed: {e}")
+                        
+    with col_out_sel:
+        all_templates = [v for v in raw_videos_list if "templates/" in v["r2_key"]] if raw_videos_list else []
+        if not all_templates:
+            st.caption("No outro templates uploaded yet. (Clips will be generated without outro).")
+            selected_template = None
+        else:
+            tmpl_options = {"None (No Outro)": None}
+            tmpl_options.update({f"{t['filename']} ({t['size_mb']} MB)": t for t in all_templates})
+            selected_tmpl_label = st.selectbox("Select Subscribe & Follow Outro Template", list(tmpl_options.keys()))
+            selected_template = tmpl_options[selected_tmpl_label]
+            
+    if selected_template:
+        st.info(f"**Selected Outro Template:** `{selected_template['filename']}`")
+
+    st.divider()
+    st.subheader("3. Dynamic Clip Range Builder (Timestamps to Shorts)")
+    st.caption("Define start time (hh:mm:ss), end time (hh:mm:ss), and label for each short clip:")
     
     to_remove = []
     for idx, clip in enumerate(st.session_state.clip_ranges):
@@ -543,11 +569,9 @@ with tab_clip:
             st.rerun()
 
     st.divider()
-    if st.button("Cut & Upload directly to R2", type="primary", use_container_width=True):
-        if not st.session_state.source_video_path:
-            st.error("Please select a local source video file first.")
-        elif not os.path.exists(st.session_state.source_video_path):
-            st.error(f"Source video file path does not exist: {st.session_state.source_video_path}")
+    if st.button("⚡ Generate Short Clips & Save Directly to R2", type="primary", use_container_width=True):
+        if not selected_raw:
+            st.error("Please select a raw long video from the R2 bucket dropdown first.")
         elif not st.session_state.clip_ranges:
             st.error("Please add at least one clip range.")
         else:
@@ -555,32 +579,32 @@ with tab_clip:
             status_text = st.empty()
             total_clips = len(st.session_state.clip_ranges)
             
-            active_template = st.session_state.template_video_path if (use_template and st.session_state.template_video_path) else None
+            tmpl_url = selected_template["r2_url"] if selected_template else None
             
             success_count = 0
             for i, clip in enumerate(st.session_state.clip_ranges):
-                msg = f"Processing Clip {i+1}/{total_clips}: '{clip['label']}'"
-                if active_template:
-                    msg += " (Stitching with Outro Template Video)..."
+                msg = f"Clipping Shorts {i+1}/{total_clips}: '{clip['label']}' from '{selected_raw['filename']}'"
+                if tmpl_url:
+                    msg += " (Stitching Outro Template)..."
                 else:
                     msg += "..."
                 status_text.text(msg)
                 
                 try:
-                    uuid_id, r2_key, r2_url = cut_and_upload_to_r2(
-                        source_path=st.session_state.source_video_path,
+                    uuid_id, r2_key, r2_url = cut_and_upload_short_from_r2(
+                        raw_video_url=selected_raw["r2_url"],
                         start_time=clip["from"],
                         end_time=clip["to"],
                         label=clip["label"],
-                        template_path=active_template
+                        template_url=tmpl_url
                     )
-                    st.success(f"Successfully clipped & stitched '{clip['label']}' directly to R2 (Key: {r2_key})")
+                    st.success(f"Successfully clipped & uploaded '{clip['label']}' directly to R2 (Key: `{r2_key}`)")
                     success_count += 1
                 except Exception as e:
                     st.error(f"Failed to clip '{clip['label']}': {e}")
                 progress_bar.progress((i + 1) / total_clips)
                 
-            status_text.text(f"Processing complete: {success_count}/{total_clips} clips uploaded to Cloudflare R2.")
+            status_text.text(f"Clipping complete: {success_count}/{total_clips} short clips saved in Cloudflare R2.")
 
 # ------------------------------------------
 # TAB B: SOCIAL SCHEDULER & INSTANT PUBLISHER
@@ -595,7 +619,7 @@ with tab_schedule:
     conn.close()
     
     if not all_clips:
-        st.info("No clips saved in database yet. Process and upload clips in Module A first.")
+        st.info("No short clips saved in database yet. Generate clips in Module A first.")
     else:
         clip_options = {f"#{c['id']} - {c['label']} [{c['status']}]": c for c in all_clips}
         
