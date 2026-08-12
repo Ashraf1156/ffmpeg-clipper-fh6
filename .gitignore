@@ -1,0 +1,25 @@
+# Streamlit Secrets (NEVER COMMIT)
+.streamlit/secrets.toml
+.streamlit/secrets.json
+.streamlit/*
+!.streamlit/secrets.toml.example
+
+# Local Database
+*.db
+metadata.db
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary / Scratch Files
+scratch/
+*.tmp
+*.log
