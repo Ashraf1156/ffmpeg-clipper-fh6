@@ -414,42 +414,88 @@ tab_clip, tab_schedule, tab_dashboard = st.tabs([
 # ------------------------------------------
 with tab_clip:
     st.subheader("1. Source Video Selection (Hook + Main Content)")
-    c_src_browse, c_src_prev, c_src_path = st.columns([1.5, 1.5, 3], vertical_alignment="center")
-    with c_src_browse:
-        if st.button("Browse Source Video", use_container_width=True):
-            selected_path = select_local_file("Select Source Video File")
-            if selected_path:
-                st.session_state.source_video_path = selected_path
-                st.rerun()
-    with c_src_prev:
-        if st.session_state.source_video_path:
+    
+    col_up_src, col_path_src = st.columns([1, 1])
+    with col_up_src:
+        uploaded_src = st.file_uploader(
+            "Upload Source Video File (Drag & Drop or Click)",
+            type=["mp4", "mov", "mkv", "avi", "webm", "m4v"],
+            key="src_uploader"
+        )
+        if uploaded_src is not None:
+            temp_dir = os.path.join(".", "temp_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            saved_src_path = os.path.join(temp_dir, uploaded_src.name)
+            with open(saved_src_path, "wb") as f:
+                f.write(uploaded_src.getbuffer())
+            st.session_state.source_video_path = os.path.abspath(saved_src_path)
+            
+    with col_path_src:
+        input_path = st.text_input(
+            "Or Enter Local / Server Video File Path",
+            value=st.session_state.source_video_path,
+            key="src_text_input"
+        )
+        if input_path != st.session_state.source_video_path:
+            st.session_state.source_video_path = input_path
+            
+        if HAS_TKINTER:
+            if st.button("📁 Browse Local Desktop File", use_container_width=True):
+                selected_path = select_local_file("Select Source Video File")
+                if selected_path:
+                    st.session_state.source_video_path = selected_path
+                    st.rerun()
+                    
+    if st.session_state.source_video_path:
+        c_src_info, c_src_btn = st.columns([3, 1], vertical_alignment="center")
+        with c_src_info:
+            st.success(f"**Selected Source File:** `{st.session_state.source_video_path}`")
+        with c_src_btn:
             if st.button("Preview Source Video", use_container_width=True):
                 preview_video_dialog(st.session_state.source_video_path, "Source Video Preview")
-    with c_src_path:
-        if st.session_state.source_video_path:
-            st.success(f"**Selected Source File:** `{st.session_state.source_video_path}`")
-        else:
-            st.caption("No source file selected.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("2. Outro / Subscribe Animation Template Video (Optional)")
     st.caption("Select a 5-second Subscribe & Follow animation template video to append at the end of every clip:")
-    c_tmpl_browse, c_tmpl_prev, c_tmpl_path = st.columns([1.5, 1.5, 3], vertical_alignment="center")
-    with c_tmpl_browse:
-        if st.button("Browse Template Video", use_container_width=True):
-            selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
-            if selected_tmpl_path:
-                st.session_state.template_video_path = selected_tmpl_path
-                st.rerun()
-    with c_tmpl_prev:
-        if st.session_state.template_video_path:
+    
+    col_up_tmpl, col_path_tmpl = st.columns([1, 1])
+    with col_up_tmpl:
+        uploaded_tmpl = st.file_uploader(
+            "Upload Subscribe Outro Template Video",
+            type=["mp4", "mov", "mkv", "avi", "webm", "m4v"],
+            key="tmpl_uploader"
+        )
+        if uploaded_tmpl is not None:
+            temp_dir = os.path.join(".", "temp_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            saved_tmpl_path = os.path.join(temp_dir, uploaded_tmpl.name)
+            with open(saved_tmpl_path, "wb") as f:
+                f.write(uploaded_tmpl.getbuffer())
+            st.session_state.template_video_path = os.path.abspath(saved_tmpl_path)
+            
+    with col_path_tmpl:
+        input_tmpl_path = st.text_input(
+            "Or Enter Outro Template File Path",
+            value=st.session_state.template_video_path,
+            key="tmpl_text_input"
+        )
+        if input_tmpl_path != st.session_state.template_video_path:
+            st.session_state.template_video_path = input_tmpl_path
+            
+        if HAS_TKINTER:
+            if st.button("📁 Browse Local Outro Template File", use_container_width=True):
+                selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
+                if selected_tmpl_path:
+                    st.session_state.template_video_path = selected_tmpl_path
+                    st.rerun()
+                    
+    if st.session_state.template_video_path:
+        c_tmpl_info, c_tmpl_btn = st.columns([3, 1], vertical_alignment="center")
+        with c_tmpl_info:
+            st.info(f"**Selected Outro Template:** `{st.session_state.template_video_path}`")
+        with c_tmpl_btn:
             if st.button("Preview Template Video", use_container_width=True):
                 preview_video_dialog(st.session_state.template_video_path, "Outro Template Video Preview")
-    with c_tmpl_path:
-        if st.session_state.template_video_path:
-            st.info(f"**Selected Outro Template:** `{st.session_state.template_video_path}`")
-        else:
-            st.caption("No template video selected (clips will be uploaded without outro).")
             
     if st.session_state.template_video_path:
         use_template = st.checkbox("Append Subscribe & Follow Outro Template to generated clips", value=True)
