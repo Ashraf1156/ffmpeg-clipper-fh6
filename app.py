@@ -191,6 +191,9 @@ def list_raw_videos_from_r2():
         st.error(f"Error fetching raw videos from R2: {e}")
         return []
 
+from boto3.s3.transfer import TransferConfig
+import gc
+
 def upload_raw_video_to_r2(file_buffer, filename, is_outro_template=False):
     s3_client = get_r2_client()
     app_sec = load_app_secrets()
@@ -201,12 +204,22 @@ def upload_raw_video_to_r2(file_buffer, filename, is_outro_template=False):
     prefix = "raw_videos/templates/" if is_outro_template else "raw_videos/"
     r2_key = f"{prefix}{sanitized}"
     
+    transfer_config = TransferConfig(
+        multipart_threshold=8 * 1024 * 1024,
+        max_concurrency=4,
+        multipart_chunksize=8 * 1024 * 1024,
+        use_threads=True
+    )
+    
     s3_client.upload_fileobj(
         file_buffer,
         bucket_name,
         r2_key,
-        ExtraArgs={"ContentType": "video/mp4"}
+        ExtraArgs={"ContentType": "video/mp4"},
+        Config=transfer_config
     )
+    
+    gc.collect()
     
     if public_domain:
         r2_url = f"{public_domain.rstrip('/')}/{r2_key}"
@@ -471,10 +484,11 @@ with tab_clip:
             key="raw_video_uploader"
         )
         if uploaded_raw is not None:
-            if st.button("Upload Raw Video to Cloudflare R2", type="primary", use_container_width=True):
+            if st.session_state.get("last_uploaded_raw") != uploaded_raw.name:
                 with st.spinner(f"Uploading '{uploaded_raw.name}' directly to Cloudflare R2 bucket..."):
                     try:
                         r_key, r_url = upload_raw_video_to_r2(uploaded_raw, uploaded_raw.name)
+                        st.session_state["last_uploaded_raw"] = uploaded_raw.name
                         st.success(f"Successfully uploaded '{uploaded_raw.name}' to R2 (`{r_key}`)!")
                         st.rerun()
                     except Exception as e:
@@ -512,10 +526,11 @@ with tab_clip:
             key="outro_template_uploader"
         )
         if uploaded_outro is not None:
-            if st.button("Upload Outro Template to R2", use_container_width=True):
+            if st.session_state.get("last_uploaded_outro") != uploaded_outro.name:
                 with st.spinner(f"Uploading template '{uploaded_outro.name}' to R2..."):
                     try:
                         tk_key, tk_url = upload_raw_video_to_r2(uploaded_outro, uploaded_outro.name, is_outro_template=True)
+                        st.session_state["last_uploaded_outro"] = uploaded_outro.name
                         st.success(f"Successfully uploaded outro template '{uploaded_outro.name}'!")
                         st.rerun()
                     except Exception as e:
