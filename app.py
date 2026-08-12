@@ -419,16 +419,18 @@ tab_clip, tab_schedule, tab_dashboard = st.tabs([
 with tab_clip:
     st.subheader("1. Source Video Selection (Hook + Main Content)")
     
+    def sync_src_path():
+        st.session_state.source_video_path = st.session_state.src_text_input
+
     col_path_src, col_browse_src = st.columns([3, 1], vertical_alignment="bottom")
     with col_path_src:
-        input_path = st.text_input(
+        st.text_input(
             "Local Source Video File Path",
             value=st.session_state.source_video_path,
             placeholder="D:/videos/my_source_video.mp4",
-            key="src_text_input"
+            key="src_text_input",
+            on_change=sync_src_path
         )
-        if input_path != st.session_state.source_video_path:
-            st.session_state.source_video_path = input_path
             
     with col_browse_src:
         if is_gui_available():
@@ -436,6 +438,7 @@ with tab_clip:
                 selected_path = select_local_file("Select Source Video File")
                 if selected_path:
                     st.session_state.source_video_path = selected_path
+                    st.session_state.src_text_input = selected_path
                     st.rerun()
 
     uploaded_src = st.file_uploader(
@@ -447,10 +450,12 @@ with tab_clip:
         temp_dir = os.path.join(".", "temp_uploads")
         os.makedirs(temp_dir, exist_ok=True)
         saved_src_path = os.path.abspath(os.path.join(temp_dir, uploaded_src.name))
-        if st.session_state.source_video_path != saved_src_path:
+        if not os.path.exists(saved_src_path) or os.path.getsize(saved_src_path) == 0:
             with open(saved_src_path, "wb") as f:
                 f.write(uploaded_src.getbuffer())
+        if st.session_state.source_video_path != saved_src_path:
             st.session_state.source_video_path = saved_src_path
+            st.session_state.src_text_input = saved_src_path
             st.rerun()
 
     if st.session_state.source_video_path:
@@ -465,16 +470,18 @@ with tab_clip:
     st.subheader("2. Outro / Subscribe Animation Template Video (Optional)")
     st.caption("Select a 5-second Subscribe & Follow animation template video to append at the end of every clip:")
     
+    def sync_tmpl_path():
+        st.session_state.template_video_path = st.session_state.tmpl_text_input
+
     col_path_tmpl, col_browse_tmpl = st.columns([3, 1], vertical_alignment="bottom")
     with col_path_tmpl:
-        input_tmpl_path = st.text_input(
+        st.text_input(
             "Outro Template File Path",
             value=st.session_state.template_video_path,
             placeholder="D:/videos/template_subscribe.mp4",
-            key="tmpl_text_input"
+            key="tmpl_text_input",
+            on_change=sync_tmpl_path
         )
-        if input_tmpl_path != st.session_state.template_video_path:
-            st.session_state.template_video_path = input_tmpl_path
             
     with col_browse_tmpl:
         if is_gui_available():
@@ -482,6 +489,7 @@ with tab_clip:
                 selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
                 if selected_tmpl_path:
                     st.session_state.template_video_path = selected_tmpl_path
+                    st.session_state.tmpl_text_input = selected_tmpl_path
                     st.rerun()
 
     uploaded_tmpl = st.file_uploader(
@@ -493,10 +501,12 @@ with tab_clip:
         temp_dir = os.path.join(".", "temp_uploads")
         os.makedirs(temp_dir, exist_ok=True)
         saved_tmpl_path = os.path.abspath(os.path.join(temp_dir, uploaded_tmpl.name))
-        if st.session_state.template_video_path != saved_tmpl_path:
+        if not os.path.exists(saved_tmpl_path) or os.path.getsize(saved_tmpl_path) == 0:
             with open(saved_tmpl_path, "wb") as f:
                 f.write(uploaded_tmpl.getbuffer())
+        if st.session_state.template_video_path != saved_tmpl_path:
             st.session_state.template_video_path = saved_tmpl_path
+            st.session_state.tmpl_text_input = saved_tmpl_path
             st.rerun()
 
     if st.session_state.template_video_path:
