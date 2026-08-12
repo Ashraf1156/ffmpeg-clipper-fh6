@@ -1,26 +1,17 @@
-# Streamlit Secrets (NEVER COMMIT)
+# Streamlit secret files
 .streamlit/secrets.toml
 .streamlit/secrets.json
-!.streamlit/config.toml
-!.streamlit/secrets.toml.example
 
-# Local Database
+# SQLite Database
 *.db
 metadata.db
 
-# Temporary Uploads & Scratch Files
-temp_uploads/
-scratch/
-*.tmp
-*.log
-
-# Virtual Environment
+# Virtual environments
 venv/
 .venv/
 env/
-ENV/
 
-# Python Cache & Bytecode
+# Python bytecode & cache
 __pycache__/
 *.py[cod]
 *$py.class

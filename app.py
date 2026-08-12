@@ -8,16 +8,11 @@ import datetime
 import requests
 import boto3
 import streamlit as st
+import tkinter as tk
+from tkinter import filedialog
 import shutil
 import imageio_ffmpeg
 import toml
-
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-    HAS_TKINTER = True
-except Exception:
-    HAS_TKINTER = False
 
 # ==========================================
 # PAGE CONFIGURATION & THEME-ADAPTIVE STYLING
@@ -137,6 +132,9 @@ def get_r2_client():
         region_name="auto"
     )
 
+# ==========================================
+# TKINTER NATIVE FILE PICKER & FFMPEG RESOLVER
+# ==========================================
 def get_ffmpeg_executable():
     system_ffmpeg = shutil.which("ffmpeg")
     if system_ffmpeg:
@@ -146,34 +144,22 @@ def get_ffmpeg_executable():
     except Exception:
         return "ffmpeg"
 
-def is_gui_available():
-    if not HAS_TKINTER:
-        return False
-    if os.name != "nt" and not os.environ.get("DISPLAY"):
-        return False
-    return True
-
 def select_local_file(title="Select Video File"):
-    if not is_gui_available():
-        return ""
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        file_path = filedialog.askopenfilename(
-            title=title,
-            filetypes=[
-                ("Video Files", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.flv"),
-                ("All Files", "*.*")
-            ]
-        )
-        root.destroy()
-        return file_path
-    except Exception:
-        return ""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    file_path = filedialog.askopenfilename(
+        title=title,
+        filetypes=[
+            ("Video Files", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.flv"),
+            ("All Files", "*.*")
+        ]
+    )
+    root.destroy()
+    return file_path
 
 # ==========================================
-# MODULE A: LOCAL VIDEO CLIPPER & R2 UPLOADER
+# MODULE A: IN-MEMORY CLIPPER & R2 UPLOADER
 # ==========================================
 def cut_and_upload_to_r2(source_path, start_time, end_time, label, template_path=None):
     ffmpeg_exe = get_ffmpeg_executable()
@@ -408,114 +394,52 @@ if "clip_ranges" not in st.session_state:
     st.session_state.clip_ranges = [{"from": "00:00:00", "to": "00:00:25", "label": "Clip 1"}]
 
 tab_clip, tab_schedule, tab_dashboard = st.tabs([
-    "Module A: Local Clipper & R2 Upload",
+    "Module A: In-Memory Clipper & R2 Upload",
     "Module B: Social Media Scheduler & Instant Publisher",
     "Module C: Status Management & Cleanup"
 ])
 
 # ------------------------------------------
-# TAB A: LOCAL CLIPPER & R2 UPLOADER
+# TAB A: IN-MEMORY CLIPPER & R2 UPLOADER
 # ------------------------------------------
 with tab_clip:
     st.subheader("1. Source Video Selection (Hook + Main Content)")
-    
-    def sync_src_path():
-        st.session_state.source_video_path = st.session_state.src_text_input
-
-    col_path_src, col_browse_src = st.columns([3, 1], vertical_alignment="bottom")
-    with col_path_src:
-        st.text_input(
-            "Local Source Video File Path",
-            value=st.session_state.source_video_path,
-            placeholder="D:/videos/my_source_video.mp4",
-            key="src_text_input",
-            on_change=sync_src_path
-        )
-            
-    with col_browse_src:
-        if is_gui_available():
-            if st.button("📁 Browse Desktop File", use_container_width=True):
-                selected_path = select_local_file("Select Source Video File")
-                if selected_path:
-                    st.session_state.source_video_path = selected_path
-                    st.session_state.src_text_input = selected_path
-                    st.rerun()
-
-    uploaded_src = st.file_uploader(
-        "Or Upload Source Video File",
-        type=["mp4", "mov", "mkv", "avi", "webm", "m4v"],
-        key="src_uploader"
-    )
-    if uploaded_src is not None:
-        temp_dir = os.path.join(".", "temp_uploads")
-        os.makedirs(temp_dir, exist_ok=True)
-        saved_src_path = os.path.abspath(os.path.join(temp_dir, uploaded_src.name))
-        if not os.path.exists(saved_src_path) or os.path.getsize(saved_src_path) == 0:
-            with open(saved_src_path, "wb") as f:
-                f.write(uploaded_src.getbuffer())
-        if st.session_state.source_video_path != saved_src_path:
-            st.session_state.source_video_path = saved_src_path
-            st.session_state.src_text_input = saved_src_path
-            st.rerun()
-
-    if st.session_state.source_video_path:
-        c_src_info, c_src_btn = st.columns([3, 1], vertical_alignment="center")
-        with c_src_info:
-            st.success(f"**Selected Source File:** `{st.session_state.source_video_path}`")
-        with c_src_btn:
+    c_src_browse, c_src_prev, c_src_path = st.columns([1.5, 1.5, 3], vertical_alignment="center")
+    with c_src_browse:
+        if st.button("Browse Source Video", use_container_width=True):
+            selected_path = select_local_file("Select Source Video File")
+            if selected_path:
+                st.session_state.source_video_path = selected_path
+                st.rerun()
+    with c_src_prev:
+        if st.session_state.source_video_path:
             if st.button("Preview Source Video", use_container_width=True):
                 preview_video_dialog(st.session_state.source_video_path, "Source Video Preview")
+    with c_src_path:
+        if st.session_state.source_video_path:
+            st.success(f"**Selected Source File:** `{st.session_state.source_video_path}`")
+        else:
+            st.caption("No source file selected.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("2. Outro / Subscribe Animation Template Video (Optional)")
     st.caption("Select a 5-second Subscribe & Follow animation template video to append at the end of every clip:")
-    
-    def sync_tmpl_path():
-        st.session_state.template_video_path = st.session_state.tmpl_text_input
-
-    col_path_tmpl, col_browse_tmpl = st.columns([3, 1], vertical_alignment="bottom")
-    with col_path_tmpl:
-        st.text_input(
-            "Outro Template File Path",
-            value=st.session_state.template_video_path,
-            placeholder="D:/videos/template_subscribe.mp4",
-            key="tmpl_text_input",
-            on_change=sync_tmpl_path
-        )
-            
-    with col_browse_tmpl:
-        if is_gui_available():
-            if st.button("📁 Browse Outro File", use_container_width=True):
-                selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
-                if selected_tmpl_path:
-                    st.session_state.template_video_path = selected_tmpl_path
-                    st.session_state.tmpl_text_input = selected_tmpl_path
-                    st.rerun()
-
-    uploaded_tmpl = st.file_uploader(
-        "Or Upload Subscribe Outro Template Video",
-        type=["mp4", "mov", "mkv", "avi", "webm", "m4v"],
-        key="tmpl_uploader"
-    )
-    if uploaded_tmpl is not None:
-        temp_dir = os.path.join(".", "temp_uploads")
-        os.makedirs(temp_dir, exist_ok=True)
-        saved_tmpl_path = os.path.abspath(os.path.join(temp_dir, uploaded_tmpl.name))
-        if not os.path.exists(saved_tmpl_path) or os.path.getsize(saved_tmpl_path) == 0:
-            with open(saved_tmpl_path, "wb") as f:
-                f.write(uploaded_tmpl.getbuffer())
-        if st.session_state.template_video_path != saved_tmpl_path:
-            st.session_state.template_video_path = saved_tmpl_path
-            st.session_state.tmpl_text_input = saved_tmpl_path
-            st.rerun()
-
-    if st.session_state.template_video_path:
-        c_tmpl_info, c_tmpl_btn = st.columns([3, 1], vertical_alignment="center")
-        with c_tmpl_info:
-            st.info(f"**Selected Outro Template:** `{st.session_state.template_video_path}`")
-        with c_tmpl_btn:
+    c_tmpl_browse, c_tmpl_prev, c_tmpl_path = st.columns([1.5, 1.5, 3], vertical_alignment="center")
+    with c_tmpl_browse:
+        if st.button("Browse Template Video", use_container_width=True):
+            selected_tmpl_path = select_local_file("Select Subscribe & Follow Template Video")
+            if selected_tmpl_path:
+                st.session_state.template_video_path = selected_tmpl_path
+                st.rerun()
+    with c_tmpl_prev:
+        if st.session_state.template_video_path:
             if st.button("Preview Template Video", use_container_width=True):
                 preview_video_dialog(st.session_state.template_video_path, "Outro Template Video Preview")
+    with c_tmpl_path:
+        if st.session_state.template_video_path:
+            st.info(f"**Selected Outro Template:** `{st.session_state.template_video_path}`")
+        else:
+            st.caption("No template video selected (clips will be uploaded without outro).")
             
     if st.session_state.template_video_path:
         use_template = st.checkbox("Append Subscribe & Follow Outro Template to generated clips", value=True)
@@ -587,7 +511,7 @@ with tab_clip:
                         label=clip["label"],
                         template_path=active_template
                     )
-                    st.success(f"Successfully clipped & stitched '{clip['label']}' directly to R2 (Key: `{r2_key}`)")
+                    st.success(f"Successfully clipped & stitched '{clip['label']}' directly to R2 (Key: {r2_key})")
                     success_count += 1
                 except Exception as e:
                     st.error(f"Failed to clip '{clip['label']}': {e}")
